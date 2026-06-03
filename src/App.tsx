@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { DifyAgent } from "./DifyAgent";
 import type { Message } from "@ag-ui/client";
 import { v4 as uuidv4 } from "uuid";
+import { loginUser } from "./auth/auth";
 
 // Read environment variables (pointing to secure proxy)
 const apiUrl = import.meta.env.VITE_DIFY_API_URL;
@@ -25,6 +26,12 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [user, setUser] = useState<any | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [prevScreen, setPrevScreen] = useState<typeof screen | null>(null);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   // Package / payment state
   const [selectedPackage, setSelectedPackage] = useState<number | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<string>('bank');
@@ -56,6 +63,59 @@ export default function App() {
     setActiveSessionId(id);
     activeSessionIdRef.current = id;
   };
+
+  const navigateTo = (newScreen: typeof screen) => {
+    setPrevScreen(screen);
+    setScreen(newScreen);
+  };
+
+  const showNavbar = screen !== 'login';
+  const showBack = screen !== 'login' && screen !== 'chat';
+  const getDisplayName = () => {
+    if (!user) return '';
+    return user.name || user.fullName || user.email || '';
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('accessToken');
+    sessionStorage.removeItem('user');
+    setAccessToken(null);
+    setUser(null);
+    setIsAuthenticated(false);
+    setShowProfileMenu(false);
+    navigateTo('login');
+  };
+
+  const handleBack = () => {
+    if (prevScreen) {
+      setScreen(prevScreen);
+      setPrevScreen(null);
+    } else {
+      navigateTo('login');
+    }
+  };
+
+  useEffect(() => {
+    // Restore session from sessionStorage if available
+    const token = sessionStorage.getItem('accessToken');
+    const userJson = sessionStorage.getItem('user');
+    if (token && userJson) {
+      try {
+        const parsed = JSON.parse(userJson);
+        setAccessToken(token);
+        setUser(parsed);
+        setIsAuthenticated(true);
+        // Determine where to land after refresh
+        if (!parsed?.Haslawportalsubfee) {
+          setScreen('packages');
+        } else {
+          setScreen('chat');
+        }
+      } catch {
+        // ignore parse errors and stay on login
+      }
+    }
+  }, []);
 
   // Subscribe to AG-UI agent messages and sync to active localStorage session in real-time
   useEffect(() => {
@@ -351,7 +411,7 @@ export default function App() {
   // Simple validators
   const validateEmail = (e: string) => /\S+@\S+\.\S+/.test(e);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setAuthError('');
     if (!validateEmail(email)) {
       setAuthError('Please enter a valid email address.');
@@ -362,8 +422,33 @@ export default function App() {
       return;
     }
 
-    // For now assume success (no backend auth change per request)
-    setScreen('packages');
+    setIsLoggingIn(true);
+    try {
+      const response = await loginUser(email, password, 3);
+      const token = (response as any)?.token;
+      const userData = (response as any)?.user ?? null;
+
+      if (token) {
+        sessionStorage.setItem('accessToken', token);
+        setAccessToken(token);
+      }
+      if (userData) {
+        sessionStorage.setItem('user', JSON.stringify(userData));
+        setUser(userData);
+        setIsAuthenticated(true);
+      }
+
+      if (!userData?.Haslawportalsubfee) {
+        navigateTo('packages');
+      } else {
+        navigateTo('chat');
+      }
+
+    } catch (error: unknown) {
+      setAuthError(error instanceof Error ? error.message : 'Login failed.');
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   const handleSignup = () => {
@@ -384,17 +469,17 @@ export default function App() {
 
     // Here you would call your backend to create the user account.
     // For this demo we simulate success and go to packages selection.
-    setScreen('packages');
+    navigateTo('packages');
   };
 
   const handleSelectPackage = (amount: number) => {
     setSelectedPackage(amount);
-    setScreen('payment');
+    navigateTo('payment');
   };
 
   const handlePayNow = () => {
     // Minimal simulated payment flow — after payment go to chat screen
-    setScreen('chat');
+    navigateTo('chat');
   };
 
   // Top-level UI flow: if not yet in chat, show auth / packages / payment screens
@@ -408,7 +493,24 @@ export default function App() {
               <h2 style={{ margin: 0 }}>ARG LAW PORTAL</h2>
               <div style={{ fontSize: 13, color: '#6b7280' }}>Secure legal advisory portal</div>
             </div>
-            <div style={{ marginLeft: 'auto' }} />
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+              {showBack && (
+                <button onClick={handleBack} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#0b69ff' }}>← Back</button>
+              )}
+              {isAuthenticated ? (
+                <div style={{ position: 'relative' }}>
+                  <button onClick={() => setShowProfileMenu(!showProfileMenu)} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer' }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 18, background: '#eef2ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{getDisplayName().charAt(0) || 'A'}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{getDisplayName()}</div>
+                  </button>
+                  {showProfileMenu && (
+                    <div style={{ position: 'absolute', right: 0, marginTop: 8, background: '#fff', border: '1px solid #eef2f6', borderRadius: 8, padding: 8, boxShadow: '0 8px 30px rgba(15,23,42,0.06)' }}>
+                      <button onClick={handleLogout} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444' }}>Logout</button>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
           </div>
 
           {screen === 'login' && (
@@ -425,7 +527,7 @@ export default function App() {
                 {authError && <div style={{ color: '#dc2626', fontSize: 13, marginTop: 12 }}>{authError}</div>}
               </div>
               <div style={{ color: '#6b7280', fontSize: 13 }}>
-                Don&apos;t have an account? <button onClick={() => setScreen('signup')} style={{ background: 'transparent', border: 'none', color: '#0b69ff', cursor: 'pointer', fontWeight: 700, padding: 0 }}>Sign Up</button>
+                Don&apos;t have an account? <button onClick={() => navigateTo('signup')} style={{ background: 'transparent', border: 'none', color: '#0b69ff', cursor: 'pointer', fontWeight: 700, padding: 0 }}>Sign Up</button>
               </div>
               <button onClick={() => alert('Password reset flow not implemented in demo')} style={{ marginTop: 10, background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer', textDecoration: 'underline', fontSize: 13 }}>Forgot password?</button>
             </div>
@@ -453,7 +555,7 @@ export default function App() {
               </div>
 
               <div style={{ fontSize: 13, color: '#6b7280' }}>
-                Already have an account? <button onClick={() => setScreen('login')} style={{ background: 'transparent', border: 'none', color: '#0b69ff', cursor: 'pointer', fontWeight: 700, padding: 0 }}>Sign In</button>
+                Already have an account? <button onClick={() => navigateTo('login')} style={{ background: 'transparent', border: 'none', color: '#0b69ff', cursor: 'pointer', fontWeight: 700, padding: 0 }}>Sign In</button>
               </div>
             </div>
           )}
@@ -496,7 +598,7 @@ export default function App() {
               {packageError && <div style={{ color: '#dc2626', marginTop: 12 }}>{packageError}</div>}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
-                <button onClick={() => { if (!selectedPackage) { setPackageError('Please select a package to continue.'); return; } setScreen('payment'); }} style={{ padding: '10px 18px', background: '#0b69ff', color: '#fff', border: 'none', borderRadius: 10 }}>Next</button>
+                <button onClick={() => { if (!selectedPackage) { setPackageError('Please select a package to continue.'); return; } navigateTo('payment'); }} style={{ padding: '10px 18px', background: '#0b69ff', color: '#fff', border: 'none', borderRadius: 10 }}>Next</button>
               </div>
             </div>
           )}
@@ -545,7 +647,7 @@ export default function App() {
 
                   <div style={{ marginTop: 12 }}>
                     <button onClick={handlePayNow} style={{ width: '100%', padding: '10px 12px', background: '#0b69ff', color: '#fff', border: 'none', borderRadius: 8 }}>Pay Now</button>
-                    <button onClick={() => setScreen('login')} style={{ marginTop: 8, width: '100%', padding: '10px 12px', background: 'transparent', color: '#0b69ff', border: '1px solid #e6edf6', borderRadius: 8 }}>Back to Login</button>
+                    <button onClick={() => navigateTo('login')} style={{ marginTop: 8, width: '100%', padding: '10px 12px', background: 'transparent', color: '#0b69ff', border: '1px solid #e6edf6', borderRadius: 8 }}>Back to Login</button>
                   </div>
                 </div>
               </div>
@@ -636,8 +738,26 @@ export default function App() {
       {/* Chat Area Panel (ChatGPT Style Workspace) */}
       <main className="chat-window">
         <header className="chat-header">
-          <div className="chat-header-info">
-            <h2>ARG Corporate AI</h2>
+          <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+            <div style={{ flex: 1 }}>
+              <h2 style={{ margin: 0 }}>ARG Corporate AI</h2>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {showBack && <button onClick={handleBack} style={{ background: 'transparent', border: 'none', color: '#0b69ff', cursor: 'pointer' }}>← Back</button>}
+              {isAuthenticated && (
+                <div style={{ position: 'relative' }}>
+                  <button onClick={() => setShowProfileMenu(!showProfileMenu)} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer' }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 18, background: '#eef2ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{getDisplayName().charAt(0) || 'A'}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{getDisplayName()}</div>
+                  </button>
+                  {showProfileMenu && (
+                    <div style={{ position: 'absolute', right: 0, marginTop: 8, background: '#fff', border: '1px solid #eef2f6', borderRadius: 8, padding: 8, boxShadow: '0 8px 30px rgba(15,23,42,0.06)' }}>
+                      <button onClick={handleLogout} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444' }}>Logout</button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
