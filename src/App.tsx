@@ -28,8 +28,8 @@ export default function App() {
   const [phone, setPhone] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [user, setUser] = useState<any | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(true);
   const [prevScreen, setPrevScreen] = useState<typeof screen | null>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   // Package / payment state
@@ -69,7 +69,7 @@ export default function App() {
     setScreen(newScreen);
   };
 
-  const showNavbar = screen !== 'login';
+  const showNavbar = screen !== 'login' && screen !== 'signup';
   const showBack = screen !== 'login' && screen !== 'chat';
   const getDisplayName = () => {
     if (!user) return '';
@@ -79,7 +79,10 @@ export default function App() {
   const handleLogout = () => {
     sessionStorage.removeItem('accessToken');
     sessionStorage.removeItem('user');
-    setAccessToken(null);
+    sessionStorage.removeItem('appScreen');
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('user');
+    localStorage.removeItem('appScreen');
     setUser(null);
     setIsAuthenticated(false);
     setShowProfileMenu(false);
@@ -97,25 +100,40 @@ export default function App() {
 
   useEffect(() => {
     // Restore session from sessionStorage if available
-    const token = sessionStorage.getItem('accessToken');
-    const userJson = sessionStorage.getItem('user');
+    const token = sessionStorage.getItem('accessToken') || localStorage.getItem('accessToken');
+    const userJson = sessionStorage.getItem('user') || localStorage.getItem('user');
+    const savedScreen = sessionStorage.getItem('appScreen') || localStorage.getItem('appScreen');
     if (token && userJson) {
       try {
         const parsed = JSON.parse(userJson);
-        setAccessToken(token);
         setUser(parsed);
         setIsAuthenticated(true);
-        // Determine where to land after refresh
-        if (!parsed?.Haslawportalsubfee) {
-          setScreen('packages');
+
+        if (savedScreen && ['packages', 'payment', 'chat'].includes(savedScreen)) {
+          setScreen(savedScreen as typeof screen);
         } else {
-          setScreen('chat');
+          if (!parsed?.Haslawportalsubfee) {
+            setScreen('packages');
+          } else {
+            setScreen('chat');
+          }
         }
       } catch {
         // ignore parse errors and stay on login
       }
     }
+    setIsRestoring(false);
   }, []);
+
+  useEffect(() => {
+    if (screen !== 'login' && screen !== 'signup') {
+      sessionStorage.setItem('appScreen', screen);
+      localStorage.setItem('appScreen', screen);
+    } else {
+      sessionStorage.removeItem('appScreen');
+      localStorage.removeItem('appScreen');
+    }
+  }, [screen]);
 
   // Subscribe to AG-UI agent messages and sync to active localStorage session in real-time
   useEffect(() => {
@@ -430,10 +448,11 @@ export default function App() {
 
       if (token) {
         sessionStorage.setItem('accessToken', token);
-        setAccessToken(token);
+        localStorage.setItem('accessToken', token);
       }
       if (userData) {
         sessionStorage.setItem('user', JSON.stringify(userData));
+        localStorage.setItem('user', JSON.stringify(userData));
         setUser(userData);
         setIsAuthenticated(true);
       }
@@ -451,7 +470,7 @@ export default function App() {
     }
   };
 
-  const handleSignup = () => {
+  const handleSignup = async () => {
     setAuthError('');
     if (!validateEmail(email)) {
       setAuthError('Please enter a valid email address.');
@@ -467,15 +486,24 @@ export default function App() {
       return;
     }
 
-    // Here you would call your backend to create the user account.
-    // For this demo we simulate success and go to packages selection.
-    navigateTo('packages');
+    setIsLoggingIn(true);
+    try {
+      // If you have a registration endpoint, enable it here.
+      // const formData = new FormData();
+      // formData.append('Email', email);
+      // formData.append('Password', password);
+      // if (phone) formData.append('PhoneNumber', phone);
+      // await registerUser(formData);
+
+      navigateTo('packages');
+    } catch (error: unknown) {
+      setAuthError(error instanceof Error ? error.message : 'Signup failed.');
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
-  const handleSelectPackage = (amount: number) => {
-    setSelectedPackage(amount);
-    navigateTo('payment');
-  };
+
 
   const handlePayNow = () => {
     // Minimal simulated payment flow — after payment go to chat screen
@@ -483,33 +511,42 @@ export default function App() {
   };
 
   // Top-level UI flow: if not yet in chat, show auth / packages / payment screens
+  if (isRestoring) {
+    return null;
+  }
+
   if (screen !== 'chat') {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f4f6f9', padding: 24 }}>
-        <div style={{ width: 920, maxWidth: '95%', background: '#fff', borderRadius: 12, boxShadow: '0 8px 32px rgba(16,24,40,0.08)', padding: 28 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
-            <img src="/Logo.svg" alt="ARG Logo" style={{ height: 48 }} />
-            <div>
-              <h2 style={{ margin: 0 }}>ARG LAW PORTAL</h2>
-              <div style={{ fontSize: 13, color: '#6b7280' }}>Secure legal advisory portal</div>
-            </div>
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ position: 'relative', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f4f6f9', padding: '120px 24px 40px' }}>
+        {showNavbar && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 28px', background: 'rgba(255,255,255,0.70)', backdropFilter: 'blur(18px)', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               {showBack && (
-                <button onClick={handleBack} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#0b69ff' }}>← Back</button>
+                <button onClick={handleBack} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#0b69ff', fontSize: 14, fontWeight: 700 }}>← Back</button>
               )}
-              {isAuthenticated ? (
-                <div style={{ position: 'relative' }}>
-                  <button onClick={() => setShowProfileMenu(!showProfileMenu)} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer' }}>
-                    <div style={{ width: 36, height: 36, borderRadius: 18, background: '#eef2ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{getDisplayName().charAt(0) || 'A'}</div>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>{getDisplayName()}</div>
-                  </button>
-                  {showProfileMenu && (
-                    <div style={{ position: 'absolute', right: 0, marginTop: 8, background: '#fff', border: '1px solid #eef2f6', borderRadius: 8, padding: 8, boxShadow: '0 8px 30px rgba(15,23,42,0.06)' }}>
-                      <button onClick={handleLogout} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444' }}>Logout</button>
-                    </div>
-                  )}
+            </div>
+            <div style={{ color: '#475569', fontWeight: 700, letterSpacing: '0.04em' }}>ARG LAW PORTAL</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, position: 'relative' }}>
+              <button onClick={() => setShowProfileMenu(!showProfileMenu)} style={{ width: 38, height: 38, borderRadius: 19, background: '#eef2ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#0b69ff', fontSize: 14, border: 'none', cursor: 'pointer' }}>
+                {getDisplayName().charAt(0) || 'A'}
+              </button>
+              {showProfileMenu && (
+                <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, background: '#fff', border: '1px solid #eef2f6', borderRadius: 10, padding: 10, boxShadow: '0 8px 30px rgba(15,23,42,0.08)', minWidth: 150 }}>
+                  <div style={{ marginBottom: 10, color: '#475569', fontWeight: 700 }}>Signed in as</div>
+                  <div style={{ marginBottom: 12, color: '#64748b', fontSize: 13, wordBreak: 'break-all' }}>{getDisplayName()}</div>
+                  <button onClick={handleLogout} style={{ width: '100%', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, color: '#0b69ff', padding: '8px 10px', cursor: 'pointer', fontWeight: 700 }}>Logout</button>
                 </div>
-              ) : null}
+              )}
+            </div>
+          </div>
+        )}
+
+        <div style={{ width: '100%', maxWidth: 1100, minHeight: 'calc(100vh - 180px)', background: '#fff', borderRadius: 20, boxShadow: '0 16px 60px rgba(16,24,40,0.12)', padding: '40px 36px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, marginBottom: 24, textAlign: 'center' }}>
+            <img src="/Logo.svg" alt="ARG Logo" style={{ height: 56, width: 56 }} />
+            <div>
+              <h2 style={{ margin: 0, fontSize: 36, letterSpacing: '0.02em' }}>ARG LAW PORTAL</h2>
+              <div style={{ fontSize: 15, color: '#6b7280', marginTop: 8 }}>Secure legal advisory portal</div>
             </div>
           </div>
 
@@ -522,7 +559,9 @@ export default function App() {
                 <div style={{ display: 'grid', gap: 14 }}>
                   <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email Address" style={{ width: '100%', padding: '14px 16px', borderRadius: 12, border: '1px solid #e5e7eb', fontSize: 14, outline: 'none' }} />
                   <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" type="password" style={{ width: '100%', padding: '14px 16px', borderRadius: 12, border: '1px solid #e5e7eb', fontSize: 14, outline: 'none' }} />
-                  <button onClick={handleLogin} style={{ width: '100%', background: '#0b69ff', color: '#fff', padding: '14px 0', borderRadius: 12, border: 'none', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>Sign In</button>
+                  <button onClick={handleLogin} disabled={isLoggingIn} style={{ width: '100%', background: '#0b69ff', color: '#fff', padding: '14px 0', borderRadius: 12, border: 'none', fontSize: 15, fontWeight: 600, cursor: isLoggingIn ? 'not-allowed' : 'pointer', opacity: isLoggingIn ? 0.7 : 1 }}>
+                    {isLoggingIn ? 'Signing In…' : 'Sign In'}
+                  </button>
                 </div>
                 {authError && <div style={{ color: '#dc2626', fontSize: 13, marginTop: 12 }}>{authError}</div>}
               </div>
@@ -549,7 +588,9 @@ export default function App() {
                   <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password *" type="password" style={{ width: '100%', padding: 12, borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 14 }} />
                   <input value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Confirm Password *" type="password" style={{ width: '100%', padding: 12, borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 14 }} />
 
-                  <button onClick={handleSignup} style={{ width: '100%', background: '#0b69ff', color: '#fff', padding: '12px 0', borderRadius: 8, border: 'none', fontSize: 15, fontWeight: 700 }}>Sign Up</button>
+                  <button onClick={handleSignup} disabled={isLoggingIn} style={{ width: '100%', background: '#0b69ff', color: '#fff', padding: '12px 0', borderRadius: 8, border: 'none', fontSize: 15, fontWeight: 700, cursor: isLoggingIn ? 'not-allowed' : 'pointer', opacity: isLoggingIn ? 0.7 : 1 }}>
+                    {isLoggingIn ? 'Signing Up…' : 'Sign Up'}
+                  </button>
                 </div>
                 {authError && <div style={{ color: '#dc2626', fontSize: 13, marginTop: 12 }}>{authError}</div>}
               </div>
