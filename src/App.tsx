@@ -33,9 +33,10 @@ export default function App() {
   const [prevScreen, setPrevScreen] = useState<typeof screen | null>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   // Package / payment state
-  const [selectedPackage, setSelectedPackage] = useState<number | null>(null);
+  const [selectedPackage, setSelectedPackage] = useState<any | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<string>('bank');
   const [packageError, setPackageError] = useState('');
+  const [products, setProducts] = useState<any[]>([]);
   const [agent] = useState(() => new DifyAgent({
     apiUrl,
     threadId: `thread_${uuidv4()}`,
@@ -80,12 +81,15 @@ export default function App() {
     sessionStorage.removeItem('accessToken');
     sessionStorage.removeItem('user');
     sessionStorage.removeItem('appScreen');
+    sessionStorage.removeItem('products');
+    sessionStorage.removeItem('loginResponse');
     localStorage.removeItem('accessToken');
     localStorage.removeItem('user');
     localStorage.removeItem('appScreen');
     setUser(null);
     setIsAuthenticated(false);
     setShowProfileMenu(false);
+    setProducts([]);
     navigateTo('login');
   };
 
@@ -102,20 +106,31 @@ export default function App() {
     // Restore session from sessionStorage if available
     const token = sessionStorage.getItem('accessToken') || localStorage.getItem('accessToken');
     const userJson = sessionStorage.getItem('user') || localStorage.getItem('user');
+    const productsJson = sessionStorage.getItem('products');
     const savedScreen = sessionStorage.getItem('appScreen') || localStorage.getItem('appScreen');
+    
     if (token && userJson) {
       try {
         const parsed = JSON.parse(userJson);
         setUser(parsed);
         setIsAuthenticated(true);
 
+        // Restore products
+        if (productsJson) {
+          try {
+            setProducts(JSON.parse(productsJson));
+          } catch {
+            // ignore parsing error
+          }
+        }
+
         if (savedScreen && ['packages', 'payment', 'chat'].includes(savedScreen)) {
           setScreen(savedScreen as typeof screen);
         } else {
-          if (!parsed?.Haslawportalsubfee) {
-            setScreen('packages');
-          } else {
+          if (parsed?.hasPaidRegistrationFee === true) {
             setScreen('chat');
+          } else {
+            setScreen('packages');
           }
         }
       } catch {
@@ -417,7 +432,7 @@ export default function App() {
 
     return tokens.map((token, index) => {
       if (token.startsWith("**") && token.endsWith("**")) {
-        return <strong key={index} style={{ fontWeight: 700, color: "#fff" }}>{token.slice(2, -2)}</strong>;
+        return <strong key={index} style={{ fontWeight: 700, color: "#000000" }}>{token.slice(2, -2)}</strong>;
       }
       if (token.startsWith("`") && token.endsWith("`")) {
         return <code key={index} style={{ fontFamily: "var(--font-mono)", background: "rgba(255,255,255,0.08)", padding: "2px 6px", borderRadius: "4px", fontSize: "0.82rem" }}>{token.slice(1, -1)}</code>;
@@ -445,11 +460,14 @@ export default function App() {
       const response = await loginUser(email, password, 3);
       const token = (response as any)?.token;
       const userData = (response as any)?.user ?? null;
+      const productsArray = (response as any)?.products ?? [];
 
+      // Store complete response in sessionStorage
       if (token) {
         sessionStorage.setItem('accessToken', token);
         localStorage.setItem('accessToken', token);
       }
+      
       if (userData) {
         sessionStorage.setItem('user', JSON.stringify(userData));
         localStorage.setItem('user', JSON.stringify(userData));
@@ -457,10 +475,20 @@ export default function App() {
         setIsAuthenticated(true);
       }
 
-      if (!userData?.Haslawportalsubfee) {
-        navigateTo('packages');
-      } else {
+      // Store products array
+      if (productsArray.length > 0) {
+        sessionStorage.setItem('products', JSON.stringify(productsArray));
+        setProducts(productsArray);
+      }
+
+      // Store complete response
+      sessionStorage.setItem('loginResponse', JSON.stringify(response));
+
+      // Check hasPaidRegistrationFee to decide navigation
+      if (userData?.hasPaidRegistrationFee === true) {
         navigateTo('chat');
+      } else {
+        navigateTo('packages');
       }
 
     } catch (error: unknown) {
@@ -605,35 +633,37 @@ export default function App() {
             <div>
               <h3 style={{ marginBottom: 8 }}>Select a package</h3>
               <div style={{ display: 'flex', gap: 16, marginTop: 12 }}>
-                {[{amt:1000, services:3},{amt:2000, services:5},{amt:3000, services:8}].map(({amt, services}) => (
+                {products.length > 0 ? products.map((product) => (
                   <div
-                    key={amt}
-                    onClick={() => { setSelectedPackage(amt); setPackageError(''); }}
+                    key={product.id}
+                    onClick={() => { setSelectedPackage(product); setPackageError(''); }}
                     style={{
                       flex: 1,
                       padding: 22,
                       borderRadius: 10,
-                      border: amt === selectedPackage ? '1px solid #0b69ff' : '1px solid #eef2f6',
+                      border: product.id === selectedPackage?.id ? '1px solid #0b69ff' : '1px solid #eef2f6',
                       cursor: 'pointer',
                       textAlign: 'center',
                       background: '#fff',
                       transition: 'transform 180ms ease, box-shadow 180ms ease',
-                      boxShadow: amt === selectedPackage ? '0 8px 30px rgba(11,105,255,0.08)' : '0 6px 18px rgba(15,23,42,0.03)'
+                      boxShadow: product.id === selectedPackage?.id ? '0 8px 30px rgba(11,105,255,0.08)' : '0 6px 18px rgba(15,23,42,0.03)'
                     }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-6px)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 18px 50px rgba(15,23,42,0.08)'; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLDivElement).style.boxShadow = amt === selectedPackage ? '0 8px 30px rgba(11,105,255,0.08)' : '0 6px 18px rgba(15,23,42,0.03)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLDivElement).style.boxShadow = product.id === selectedPackage?.id ? '0 8px 30px rgba(11,105,255,0.08)' : '0 6px 18px rgba(15,23,42,0.03)'; }}
                   >
-                    <div style={{ fontSize: 20, fontWeight: 800 }}>Rs. {amt.toLocaleString()}</div>
-                    <div style={{ fontSize: 13, color: '#6b7280', marginTop: 6 }}>Package</div>
+                    <div style={{ fontSize: 20, fontWeight: 800 }}>Rs. {product.price?.toLocaleString() || '0'}</div>
+                    <div style={{ fontSize: 13, color: '#6b7280', marginTop: 6 }}>{product.name}</div>
 
-                    <div style={{ marginTop: 14, color: '#1f2937', fontWeight: 600 }}>{services} Services</div>
-                    <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>Includes core legal advisory items</div>
+                    <div style={{ marginTop: 14, color: '#1f2937', fontWeight: 600 }}>Product ID: {product.productTypeId}</div>
+                    <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>{product.isActive ? 'Active Package' : 'Inactive'}</div>
 
                     <div style={{ marginTop: 14 }}>
-                      <button style={{ padding: '8px 12px', background: amt === selectedPackage ? '#0b69ff' : '#eef2ff', color: amt === selectedPackage ? '#fff' : '#0b69ff', border: 'none', borderRadius: 8, cursor: 'pointer' }}>{amt === selectedPackage ? 'Selected' : 'Select'}</button>
+                      <button style={{ padding: '8px 12px', background: product.id === selectedPackage?.id ? '#0b69ff' : '#eef2ff', color: product.id === selectedPackage?.id ? '#fff' : '#0b69ff', border: 'none', borderRadius: 8, cursor: 'pointer' }}>{product.id === selectedPackage?.id ? 'Selected' : 'Select'}</button>
                     </div>
                   </div>
-                ))}
+                )) : (
+                  <div style={{ color: '#6b7280', padding: 20 }}>No packages available</div>
+                )}
               </div>
 
               {packageError && <div style={{ color: '#dc2626', marginTop: 12 }}>{packageError}</div>}
@@ -647,7 +677,7 @@ export default function App() {
           {screen === 'payment' && (
             <div>
               <h3 style={{ textAlign: 'center' }}>Select Payment Method</h3>
-              <p style={{ textAlign: 'center', color: '#6b7280' }}>Choose your preferred way to pay the registration fee of Rs. {selectedPackage ?? '0'}</p>
+              <p style={{ textAlign: 'center', color: '#6b7280' }}>Choose your preferred way to pay for {selectedPackage?.name} - Rs. {selectedPackage?.price?.toLocaleString() ?? '0'}</p>
 
               <div style={{ display: 'flex', gap: 18, marginTop: 12 }}>
                 <div style={{ flex: 2 }}>
@@ -671,8 +701,8 @@ export default function App() {
                 <div style={{ flex: 1, border: '1px solid #eef2f6', borderRadius: 10, padding: 16, background: '#fff' }}>
                   <div style={{ fontWeight: 700, marginBottom: 8 }}>Order Summary</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#6b7280' }}>
-                    <div>Registration Fee</div>
-                    <div>Rs. {selectedPackage ?? '0'}</div>
+                    <div>{selectedPackage?.name}</div>
+                    <div>Rs. {selectedPackage?.price?.toLocaleString() ?? '0'}</div>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#6b7280', marginTop: 6 }}>
                     <div>Processing Fee</div>
@@ -683,7 +713,11 @@ export default function App() {
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 16 }}>
                     <div>Total Amount</div>
-                    <div>Rs. {selectedPackage ?? '0'}</div>
+                    <div>Rs. {selectedPackage?.price?.toLocaleString() ?? '0'}</div>
+                  </div>
+
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
+                    <strong>Product ID:</strong> {selectedPackage?.productTypeId}
                   </div>
 
                   <div style={{ marginTop: 12 }}>
