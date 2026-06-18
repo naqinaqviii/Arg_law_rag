@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { DifyAgent } from "./DifyAgent";
 import type { Message } from "@ag-ui/client";
 import { v4 as uuidv4 } from "uuid";
-import { loginUser } from "./auth/auth";
+import { loginUser, registerUser } from "./auth/auth";
 
 // Read environment variables (pointing to secure proxy)
 const apiUrl = import.meta.env.VITE_DIFY_API_URL;
@@ -27,6 +27,7 @@ export default function App() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [user, setUser] = useState<any | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isRestoring, setIsRestoring] = useState(true);
@@ -75,6 +76,11 @@ export default function App() {
   const getDisplayName = () => {
     if (!user) return '';
     return user.name || user.fullName || user.email || '';
+  };
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    window.setTimeout(() => setToast(null), 4200);
   };
 
   const handleLogout = () => {
@@ -457,6 +463,7 @@ export default function App() {
 
     setIsLoggingIn(true);
     try {
+        // navigateTo('chat');
       const response = await loginUser(email, password, 3);
       const token = (response as any)?.token;
       const userData = (response as any)?.user ?? null;
@@ -498,7 +505,12 @@ export default function App() {
     }
   };
 
-  const handleSignup = async () => {
+
+
+
+
+
+ const handleSignup = async () => {
     setAuthError('');
     if (!validateEmail(email)) {
       setAuthError('Please enter a valid email address.');
@@ -515,23 +527,29 @@ export default function App() {
     }
 
     setIsLoggingIn(true);
-    try {
-      // If you have a registration endpoint, enable it here.
-      // const formData = new FormData();
-      // formData.append('Email', email);
-      // formData.append('Password', password);
-      // if (phone) formData.append('PhoneNumber', phone);
-      // await registerUser(formData);
 
-      navigateTo('packages');
-    } catch (error: unknown) {
-      setAuthError(error instanceof Error ? error.message : 'Signup failed.');
+    try {
+      const formData = new FormData();
+      formData.append("Email", email);
+      formData.append("Password", password);
+      formData.append("ConfirmPassword", confirmPassword);
+      formData.append("PhoneNumber", phone);
+      formData.append("Role", "ArgLawPortal");
+      formData.append("UserType", "visaapplicant");
+      formData.append("ApplicantType", "visaapplicant");
+
+      const response = await registerUser(formData);
+      console.log("Registration success:", response);
+      showToast('Registration successful! Please log in with your new credentials.', 'success');
+      navigateTo('login');
+    } catch (err: any) {
+      const message = err?.message || 'Registration failed. Please try again.';
+      setAuthError(message);
+      showToast(message, 'error');
     } finally {
       setIsLoggingIn(false);
     }
   };
-
-
 
   const handlePayNow = () => {
     // Minimal simulated payment flow — after payment go to chat screen
@@ -546,6 +564,11 @@ export default function App() {
   if (screen !== 'chat') {
     return (
       <div style={{ position: 'relative', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f4f6f9', padding: '120px 24px 40px' }}>
+        {toast && (
+          <div style={{ position: 'fixed', top: 20, right: 20, zIndex: 120, minWidth: 260, padding: '14px 18px', borderRadius: 14, background: toast.type === 'success' ? '#0b69ff' : '#dc2626', color: '#ffffff', boxShadow: '0 24px 70px rgba(15,23,42,0.18)', fontWeight: 700, textAlign: 'center' }}>
+            {toast.message}
+          </div>
+        )}
         {showNavbar && (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 28px', background: 'rgba(255,255,255,0.70)', backdropFilter: 'blur(18px)', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

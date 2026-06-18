@@ -23,13 +23,13 @@ interface DifyAgentConfig extends AgentConfig {
 
 export class DifyAgent extends AbstractAgent {
   private apiKey?: string;
-  private apiUrl: string;
+  // private apiUrl: string;
   private currentConversationId: string | null = null;
 
   constructor(config: DifyAgentConfig) {
     super(config);
     this.apiKey = config.apiKey;
-    this.apiUrl = config.apiUrl;
+    // this.apiUrl = config.apiUrl;
 
     // Load persistent conversation ID if saved
     const savedConvId = localStorage.getItem("dify_conversation_id");
@@ -102,10 +102,13 @@ export class DifyAgent extends AbstractAgent {
           };
           
           if (this.apiKey) {
-            requestHeaders["Authorization"] = `Bearer ${this.apiKey}`;
+            // requestHeaders["Authorization"] = `Bearer ${this.apiKey}`;
+            requestHeaders["Authorization"] = `Bearer ${"app-zsz2cJNCw0T8nfy2I8XSgk5r"}`;
           }
+            requestHeaders["Authorization"] = `Bearer ${"app-zsz2cJNCw0T8nfy2I8XSgk5r"}`;
 
-          const response = await fetch(`${this.apiUrl}/chat-messages`, {
+          // const response = await fetch(`${this.apiUrl}/chat-messages`, {
+          const response = await fetch(`${'http://26.59.118.204/v1'}/chat-messages`, {
             method: "POST",
             headers: requestHeaders,
             signal: abortController.signal,

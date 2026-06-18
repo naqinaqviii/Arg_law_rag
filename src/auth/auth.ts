@@ -53,7 +53,10 @@ export const loginUser = async (email: string, password: string, productid = 0) 
 
         return (await res.json()) as LoginResponse;
     } catch (error: unknown) {
-        throw new Error("Login failed", { cause: error });
+        if (error instanceof Error) {
+            throw error;
+        }
+        throw new Error("Login failed");
     }
 };
 
@@ -71,7 +74,10 @@ export const registerUser = async (formData: FormData) => {
 
         return (await res.json()) as RegisterResponse;
     } catch (error: unknown) {
-        throw new Error("Registration failed", { cause: error });
+        if (error instanceof Error) {
+            throw error;
+        }
+        throw new Error("Registration failed");
     }
 };
 
