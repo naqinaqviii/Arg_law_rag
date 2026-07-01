@@ -103,12 +103,14 @@ export class DifyAgent extends AbstractAgent {
           
           if (this.apiKey) {
             // requestHeaders["Authorization"] = `Bearer ${this.apiKey}`;
-            requestHeaders["Authorization"] = `Bearer ${"app-zsz2cJNCw0T8nfy2I8XSgk5r"}`;
+            requestHeaders["Authorization"] = `Bearer ${"app-NaiszFmtKTlPA13NLzT4Mc80"}`;
           }
-            requestHeaders["Authorization"] = `Bearer ${"app-zsz2cJNCw0T8nfy2I8XSgk5r"}`;
+            requestHeaders["Authorization"] = `Bearer ${"app-NaiszFmtKTlPA13NLzT4Mc80"}`;
 
           // const response = await fetch(`${this.apiUrl}/chat-messages`, {
-          const response = await fetch(`${'http://26.59.118.204/v1'}/chat-messages`, {
+          const response = await fetch(`${'http://kcomputes-mac-mini.tailfd0055.ts.net/v1'}/chat-messages`, {
+            // http://kcomputes-mac-mini.tailfd0055.ts.net/v1
+            // https://kcomputes-mac-mini.tailfd0055.ts.net/v1
             method: "POST",
             headers: requestHeaders,
             signal: abortController.signal,
