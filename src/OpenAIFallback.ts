@@ -13,12 +13,10 @@
 
 import { EventType } from "@ag-ui/client";
 import type {
-  RunStartedEvent,
   RunFinishedEvent,
   TextMessageStartEvent,
   TextMessageContentEvent,
   TextMessageEndEvent,
-  RunErrorEvent,
   Message,
 } from "@ag-ui/client";
 
@@ -174,7 +172,6 @@ export async function streamOpenAIFallback(
 
   // Try current key, then rotate through remaining keys on quota errors
   let response: Response | null = null;
-  const startIndex = activeKeyIndex;
 
   while (true) {
     const key = getActiveKey();
