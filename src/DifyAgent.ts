@@ -14,7 +14,13 @@ import type {
 } from "@ag-ui/client";
 import { Observable } from "rxjs";
 import { v4 as uuidv4 } from "uuid";
+import { streamOpenAIFallback } from "./OpenAIFallback";
 
+
+// Read fallback timeout from env (default 15 seconds)
+const FALLBACK_TIMEOUT_MS = Number(
+  import.meta.env.VITE_OPENAI_FALLBACK_TIMEOUT_MS ?? 15000
+);
 
 interface DifyAgentConfig extends AgentConfig {
   apiKey?: string;
@@ -23,13 +29,13 @@ interface DifyAgentConfig extends AgentConfig {
 
 export class DifyAgent extends AbstractAgent {
   private apiKey?: string;
-  // private apiUrl: string;
+  private apiUrl: string;
   private currentConversationId: string | null = null;
 
   constructor(config: DifyAgentConfig) {
     super(config);
     this.apiKey = config.apiKey;
-    // this.apiUrl = config.apiUrl;
+    this.apiUrl = config.apiUrl;
 
     // Load persistent conversation ID if saved
     const savedConvId = localStorage.getItem("dify_conversation_id");
@@ -69,11 +75,11 @@ export class DifyAgent extends AbstractAgent {
     formData.append("user", "ag-ui-client-user");
 
     const requestHeaders: Record<string, string> = {
-      "Authorization": `Bearer app-NaiszFmtKTlPA13NLzT4Mc80`
+      "Authorization": `Bearer ${this.apiKey || "app-NaiszFmtKTlPA13NLzT4Mc80"}`
     };
 
     console.log("[DifyAgent] Uploading file to Dify:", file.name, "size:", file.size);
-    const response = await fetch("http://kcomputes-mac-mini.tailfd0055.ts.net/v1/files/upload", {
+    const response = await fetch(`${this.apiUrl}/files/upload`, {
       method: "POST",
       headers: requestHeaders,
       body: formData
@@ -94,6 +100,9 @@ export class DifyAgent extends AbstractAgent {
    * Main entry point required by AbstractAgent.
    * Connects to Dify's streaming /chat-messages endpoint, parses the SSE chunks,
    * and yields them mapped to AG-UI events.
+   *
+   * If Dify does not return the first content token within FALLBACK_TIMEOUT_MS,
+   * the Dify request is aborted and the query is re-routed to OpenAI as a fallback.
    */
   public override run(input: RunAgentInput): any {
     return new Observable<any>((subscriber) => {
@@ -156,6 +165,43 @@ export class DifyAgent extends AbstractAgent {
         timestamp: Date.now()
       } as RunStartedEvent);
 
+      // ── Timeout-based fallback logic ──────────────────────────────────
+      let firstTokenReceived = false;
+      let fallbackTriggered = false;
+
+      const fallbackTimer = setTimeout(() => {
+        if (!firstTokenReceived && !subscriber.closed) {
+          fallbackTriggered = true;
+          console.warn(
+            `[DifyAgent] Dify did not respond within ${FALLBACK_TIMEOUT_MS}ms — falling back to OpenAI.`
+          );
+
+          // Abort the ongoing Dify request
+          abortController.abort();
+
+          // Launch OpenAI fallback stream
+          const fallbackAbort = new AbortController();
+          streamOpenAIFallback(
+            subscriber,
+            input.runId,
+            assistantMessageId,
+            input.messages,
+            fallbackAbort.signal
+          ).catch((fallbackErr: any) => {
+            console.error("[DifyAgent] OpenAI fallback also failed:", fallbackErr);
+            subscriber.next({
+              type: EventType.RUN_ERROR,
+              message:
+                fallbackErr?.message ||
+                "Both Dify and OpenAI fallback failed.",
+              timestamp: Date.now()
+            } as RunErrorEvent);
+            subscriber.error(fallbackErr);
+          });
+        }
+      }, FALLBACK_TIMEOUT_MS);
+      // ─────────────────────────────────────────────────────────────────
+
       // Perform the streaming request to Dify
       const runStream = async () => {
         try {
@@ -164,10 +210,10 @@ export class DifyAgent extends AbstractAgent {
           };
 
           if (this.apiKey) {
-            // requestHeaders["Authorization"] = `Bearer ${this.apiKey}`;
+            requestHeaders["Authorization"] = `Bearer ${this.apiKey}`;
+          } else {
             requestHeaders["Authorization"] = `Bearer ${"app-NaiszFmtKTlPA13NLzT4Mc80"}`;
           }
-          requestHeaders["Authorization"] = `Bearer ${"app-NaiszFmtKTlPA13NLzT4Mc80"}`;
 
           const requestBody = {
             inputs: {},
@@ -179,7 +225,7 @@ export class DifyAgent extends AbstractAgent {
           };
           console.log("[DifyAgent] POST /chat-messages request body:", requestBody);
 
-          const response = await fetch(`${'http://kcomputes-mac-mini.tailfd0055.ts.net/v1'}/chat-messages`, {
+          const response = await fetch(`${this.apiUrl}/chat-messages`, {
             method: "POST",
             headers: requestHeaders,
             signal: abortController.signal,
@@ -203,6 +249,9 @@ export class DifyAgent extends AbstractAgent {
             const { done, value } = await reader.read();
             if (done) break;
 
+            // If fallback already took over, stop processing Dify chunks
+            if (fallbackTriggered) return;
+
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split("\n");
 
@@ -212,6 +261,9 @@ export class DifyAgent extends AbstractAgent {
             for (const line of lines) {
               const trimmed = line.trim();
               if (!trimmed) continue;
+
+              // If fallback already took over mid-loop, bail out
+              if (fallbackTriggered) return;
 
               // Parse Dify SSE prefix (e.g. data: {"event": "..."})
               if (trimmed.startsWith("data:")) {
@@ -223,6 +275,11 @@ export class DifyAgent extends AbstractAgent {
                   if (payload.event === "message" || payload.event === "agent_message") {
                     // Emit TEXT_MESSAGE_START on first token
                     if (!hasStartedMessage) {
+                      // ── Mark first token received → cancel fallback timer ──
+                      firstTokenReceived = true;
+                      clearTimeout(fallbackTimer);
+                      // ──────────────────────────────────────────────────────
+
                       subscriber.next({
                         type: EventType.TEXT_MESSAGE_START,
                         messageId: assistantMessageId,
@@ -267,6 +324,7 @@ export class DifyAgent extends AbstractAgent {
                       timestamp: Date.now()
                     } as RunFinishedEvent);
 
+                    clearTimeout(fallbackTimer);
                     subscriber.complete();
                     return;
                   }
@@ -284,7 +342,8 @@ export class DifyAgent extends AbstractAgent {
           }
 
           // Fallback if stream closed abruptly without message_end
-          if (!subscriber.closed) {
+          if (!subscriber.closed && !fallbackTriggered) {
+            clearTimeout(fallbackTimer);
             if (hasStartedMessage) {
               subscriber.next({
                 type: EventType.TEXT_MESSAGE_END,
@@ -302,13 +361,34 @@ export class DifyAgent extends AbstractAgent {
           }
 
         } catch (error: any) {
+          // If the error is due to intentional abort for fallback, don't treat it as a real error
+          if (fallbackTriggered) {
+            return; // OpenAI fallback is already handling the response
+          }
+
+          clearTimeout(fallbackTimer);
           console.error("Dify agent stream failed:", error);
-          subscriber.next({
-            type: EventType.RUN_ERROR,
-            message: error?.message || "Connection failed.",
-            timestamp: Date.now()
-          } as RunErrorEvent);
-          subscriber.error(error);
+
+          // If Dify fails outright (not timeout), also try the OpenAI fallback
+          if (!subscriber.closed) {
+            console.warn("[DifyAgent] Dify failed — attempting OpenAI fallback.");
+            try {
+              await streamOpenAIFallback(
+                subscriber,
+                input.runId,
+                assistantMessageId,
+                input.messages
+              );
+            } catch (fallbackErr: any) {
+              console.error("[DifyAgent] OpenAI fallback also failed:", fallbackErr);
+              subscriber.next({
+                type: EventType.RUN_ERROR,
+                message: fallbackErr?.message || "Both Dify and OpenAI fallback failed.",
+                timestamp: Date.now()
+              } as RunErrorEvent);
+              subscriber.error(fallbackErr);
+            }
+          }
         }
       };
 
@@ -316,6 +396,7 @@ export class DifyAgent extends AbstractAgent {
 
       // Clean up connection if unsubscribed
       return () => {
+        clearTimeout(fallbackTimer);
         abortController.abort();
       };
     });

@@ -40,6 +40,7 @@ export default function App() {
   const [products, setProducts] = useState<any[]>([]);
   const [agent] = useState(() => new DifyAgent({
     apiUrl,
+    apiKey: "app-NaiszFmtKTlPA13NLzT4Mc80",
     threadId: `thread_${uuidv4()}`,
     debug: true
   }));

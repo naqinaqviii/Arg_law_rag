@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/usermanagement/api/:path*",
+      "destination": "https://members.onewindowoep.com/usermanagement/api/:path*"
+    }
+  ]
+}
