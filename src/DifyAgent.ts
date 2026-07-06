@@ -61,6 +61,36 @@ export class DifyAgent extends AbstractAgent {
   }
 
   /**
+   * Upload a file to Dify's /files/upload endpoint.
+   */
+  public async uploadFile(file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("user", "ag-ui-client-user");
+
+    const requestHeaders: Record<string, string> = {
+      "Authorization": `Bearer app-NaiszFmtKTlPA13NLzT4Mc80`
+    };
+
+    console.log("[DifyAgent] Uploading file to Dify:", file.name, "size:", file.size);
+    const response = await fetch("http://kcomputes-mac-mini.tailfd0055.ts.net/v1/files/upload", {
+      method: "POST",
+      headers: requestHeaders,
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("[DifyAgent] Upload failed with status:", response.status, "body:", errText);
+      throw new Error(`Dify upload error (${response.status}): ${errText}`);
+    }
+
+    const data = await response.json();
+    console.log("[DifyAgent] Upload success, response data:", data);
+    return data;
+  }
+
+  /**
    * Main entry point required by AbstractAgent.
    * Connects to Dify's streaming /chat-messages endpoint, parses the SSE chunks,
    * and yields them mapped to AG-UI events.
@@ -69,9 +99,41 @@ export class DifyAgent extends AbstractAgent {
     return new Observable<any>((subscriber) => {
       // 1. Get the latest user message from the run input
       const userMessages = input.messages.filter((m) => m.role === "user");
-      const latestQuery = userMessages[userMessages.length - 1]?.content || "";
+      const latestMessage = userMessages[userMessages.length - 1];
 
-      if (!latestQuery) {
+      let latestQuery = "";
+      const difyFiles: Array<{ type: string; transfer_method: string; upload_file_id: string }> = [];
+
+      if (latestMessage) {
+        console.log("[DifyAgent] run latestMessage:", latestMessage);
+        if (typeof latestMessage.content === "string") {
+          latestQuery = latestMessage.content;
+        } else if (Array.isArray(latestMessage.content)) {
+          for (const part of latestMessage.content) {
+            if (part.type === "text") {
+              latestQuery += (part.text || "");
+            } else if (part.type === "document") {
+              const metadata = (part as any).metadata;
+              const source = (part as any).source;
+              const fileId = metadata?.id || metadata?.upload_file_id;
+              const mimeType = source?.mimeType || "";
+              const isImage = mimeType.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp"].includes(metadata?.extension || "");
+              const type = isImage ? "image" : "document";
+              if (fileId) {
+                difyFiles.push({
+                  type,
+                  transfer_method: "local_file",
+                  upload_file_id: fileId
+                });
+              }
+            }
+          }
+        }
+      }
+
+      console.log("[DifyAgent] run parameters - latestQuery:", latestQuery, "difyFiles:", difyFiles);
+
+      if (!latestQuery && difyFiles.length === 0) {
         subscriber.next({
           type: EventType.RUN_FINISHED,
           runId: input.runId,
@@ -107,20 +169,21 @@ export class DifyAgent extends AbstractAgent {
           }
             requestHeaders["Authorization"] = `Bearer ${"app-NaiszFmtKTlPA13NLzT4Mc80"}`;
 
-          // const response = await fetch(`${this.apiUrl}/chat-messages`, {
+          const requestBody = {
+            inputs: {},
+            query: latestQuery,
+            response_mode: "streaming",
+            user: "ag-ui-client-user",
+            conversation_id: this.currentConversationId || "",
+            ...(difyFiles.length > 0 ? { files: difyFiles } : {})
+          };
+          console.log("[DifyAgent] POST /chat-messages request body:", requestBody);
+
           const response = await fetch(`${'http://kcomputes-mac-mini.tailfd0055.ts.net/v1'}/chat-messages`, {
-            // http://kcomputes-mac-mini.tailfd0055.ts.net/v1
-            // https://kcomputes-mac-mini.tailfd0055.ts.net/v1
             method: "POST",
             headers: requestHeaders,
             signal: abortController.signal,
-            body: JSON.stringify({
-              inputs: {},
-              query: latestQuery,
-              response_mode: "streaming",
-              user: "ag-ui-client-user",
-              conversation_id: this.currentConversationId || ""
-            })
+            body: JSON.stringify(requestBody)
           });
 
           if (!response.ok) {

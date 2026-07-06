@@ -51,6 +51,48 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  // File upload state and reference
+  const [attachedFiles, setAttachedFiles] = useState<any[]>([]);
+  const [uploadingFiles, setUploadingFiles] = useState<any[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const fileList = Array.from(files);
+    
+    for (const file of fileList) {
+      const tempId = uuidv4();
+      setUploadingFiles(prev => [...prev, { tempId, name: file.name }]);
+
+      try {
+        const response = await agent.uploadFile(file);
+        const attached = {
+          id: response.id,
+          name: response.name,
+          size: response.size,
+          extension: response.extension || file.name.split('.').pop() || '',
+          mimeType: response.mime_type || file.type || 'application/octet-stream'
+        };
+        setAttachedFiles(prev => [...prev, attached]);
+      } catch (err: any) {
+        console.error(err);
+        showToast(`Failed to upload ${file.name}: ${err.message || 'Error'}`, 'error');
+      } finally {
+        setUploadingFiles(prev => prev.filter(f => f.tempId !== tempId));
+      }
+    }
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const removeAttachedFile = (id: string) => {
+    setAttachedFiles(prev => prev.filter(f => f.id !== id));
+  };
+
   // Dynamic sessions state backed by localStorage
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const saved = localStorage.getItem("arg_chat_sessions");
@@ -266,24 +308,53 @@ export default function App() {
 
   // Handle sending message
   const handleSend = async (text: string) => {
-    if (!text.trim() || isGenerating) return;
+    if ((!text.trim() && attachedFiles.length === 0) || isGenerating) return;
 
     setErrorMessage("");
     setIsGenerating(true);
 
     let currentSessionId = activeSessionId;
+    const currentAttached = [...attachedFiles];
+
+    // Format content: either simple text string or array of parts if there are attached files
+    let messageContent: any = text;
+    if (currentAttached.length > 0) {
+      messageContent = [
+        { type: "text" as const, text },
+        ...currentAttached.map(f => ({
+          type: "document" as const,
+          source: {
+            type: "url" as const,
+            value: ""
+          },
+          metadata: {
+            id: f.id,
+            name: f.name,
+            size: f.size,
+            extension: f.extension,
+            mimeType: f.mimeType
+          }
+        }))
+      ];
+    }
+
+    // Clear attached files immediately in UI
+    setAttachedFiles([]);
 
     try {
       // 1. If it is a completely brand new chat, initialize a dynamic localStorage session!
       if (!currentSessionId) {
         const newId = uuidv4();
-        const cleanTitle = text.length > 25 ? text.substring(0, 25) + "..." : text;
+        const cleanTitle = text.trim()
+          ? (text.length > 25 ? text.substring(0, 25) + "..." : text)
+          : (currentAttached.length > 0 ? currentAttached[0].name : "Document");
+          
         const newSession: ChatSession = {
           id: newId,
           title: cleanTitle,
           icon: "💬",
           conversationId: null,
-          messages: [{ id: `msg_${uuidv4()}`, role: "user" as const, content: text }],
+          messages: [{ id: `msg_${uuidv4()}`, role: "user" as const, content: messageContent }],
           createdAt: Date.now()
         };
 
@@ -305,7 +376,7 @@ export default function App() {
             if (s.id === currentSessionId) {
               return {
                 ...s,
-                messages: [...s.messages, { id: `msg_${uuidv4()}`, role: "user" as const, content: text }]
+                messages: [...s.messages, { id: `msg_${uuidv4()}`, role: "user" as const, content: messageContent }]
               };
             }
             return s;
@@ -319,7 +390,7 @@ export default function App() {
       agent.addMessage({
         id: `msg_${uuidv4()}`,
         role: "user" as const,
-        content: text
+        content: messageContent
       });
 
       // 3. Invoke Dify RAG endpoint (routed securely via backend proxy)
@@ -352,6 +423,97 @@ export default function App() {
       }).join("");
     }
     return "";
+  };
+
+  const getMessageDocuments = (content: any): any[] => {
+    if (Array.isArray(content)) {
+      return content.filter(part => part && typeof part === "object" && part.type === "document");
+    }
+    return [];
+  };
+
+  const getFileIcon = (ext: string): string => {
+    switch (ext) {
+      case "pdf": return "📄";
+      case "doc":
+      case "docx": return "📝";
+      case "xls":
+      case "xlsx": return "📊";
+      case "png":
+      case "jpg":
+      case "jpeg":
+      case "gif":
+      case "webp": return "🖼️";
+      case "txt": return "🔤";
+      case "zip":
+      case "rar": return "📦";
+      default: return "📎";
+    }
+  };
+
+  const renderMessageDocuments = (content: any) => {
+    const docs = getMessageDocuments(content);
+    if (docs.length === 0) return null;
+
+    return (
+      <div className="message-documents-container" style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "10px" }}>
+        {docs.map((doc: any, idx: number) => {
+          const name = doc.metadata?.name || "document";
+          const size = doc.metadata?.size;
+          const ext = (doc.metadata?.extension || name.split('.').pop() || '').toLowerCase();
+          const formattedSize = size ? (size > 1024 * 1024 ? `${(size / (1024 * 1024)).toFixed(1)} MB` : `${(size / 1024).toFixed(0)} KB`) : "";
+
+          return (
+            <div key={idx} className="message-document-card" style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              padding: "10px 14px",
+              borderRadius: "8px",
+              background: "rgba(0, 0, 0, 0.03)",
+              border: "1px solid var(--border-glass)",
+              minWidth: "200px",
+              maxWidth: "280px"
+            }}>
+              <div className="document-icon" style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "6px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(37, 99, 235, 0.08)",
+                color: "var(--accent-bright-blue)",
+                fontSize: "1.1rem",
+                fontWeight: 800
+              }}>
+                {getFileIcon(ext)}
+              </div>
+              <div className="document-details" style={{ overflow: "hidden", flex: 1 }}>
+                <div className="document-name" style={{
+                  fontSize: "0.82rem",
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis"
+                }} title={name}>
+                  {name}
+                </div>
+                {formattedSize && (
+                  <div className="document-size" style={{
+                    fontSize: "0.7rem",
+                    color: "var(--text-muted)"
+                  }}>
+                    {formattedSize}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   // Premium ChatGPT Code Copy Handler
@@ -935,6 +1097,7 @@ export default function App() {
                     </div>
                     <div className="message-bubble">
                       {formatMessageText(getMessageText(msg.content), msg.id)}
+                      {renderMessageDocuments(msg.content)}
                     </div>
                   </div>
                 </div>
@@ -977,28 +1140,129 @@ export default function App() {
 
         {/* Input Panel Area */}
         <footer className="input-panel">
-          <div className="input-container">
-            <textarea
-              className="chat-input"
-              rows={1}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask anything about corporate law or notices..."
-              disabled={isGenerating}
-            />
-            <button
-              className="send-button"
-              onClick={() => {
-                handleSend(inputValue);
-                setInputValue("");
-              }}
-              disabled={!inputValue.trim() || isGenerating}
-            >
-              <svg className="send-icon-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-              </svg>
-            </button>
+          <div className="input-container" style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: "10px" }}>
+            
+            {/* Attachment Previews Area */}
+            {(attachedFiles.length > 0 || uploadingFiles.length > 0) && (
+              <div className="attachment-previews" style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "8px",
+                paddingBottom: "8px",
+                borderBottom: "1px solid rgba(0, 0, 0, 0.06)"
+              }}>
+                {attachedFiles.map((file) => (
+                  <div key={file.id} className="attachment-preview-chip" style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    background: "var(--bg-app)",
+                    border: "1px solid var(--border-glass)",
+                    borderRadius: "6px",
+                    padding: "4px 8px",
+                    fontSize: "0.75rem",
+                    fontWeight: 600
+                  }}>
+                    <span>{getFileIcon(file.extension.toLowerCase())}</span>
+                    <span style={{ maxWidth: "120px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={file.name}>
+                      {file.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachedFile(file.id)}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "var(--text-muted)",
+                        marginLeft: "4px",
+                        fontSize: "0.85rem",
+                        lineHeight: 1
+                      }}
+                      onMouseOver={(e) => (e.currentTarget.style.color = "#dc2626")}
+                      onMouseOut={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                {uploadingFiles.map((file) => (
+                  <div key={file.tempId} className="attachment-preview-chip uploading" style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    background: "var(--bg-app)",
+                    border: "1px solid var(--border-glass)",
+                    borderRadius: "6px",
+                    padding: "4px 8px",
+                    fontSize: "0.75rem",
+                    opacity: 0.7
+                  }}>
+                    <span className="spinner-icon">⏳</span>
+                    <span style={{ maxWidth: "120px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {file.name}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Input Row */}
+            <div style={{ display: "flex", alignItems: "flex-end", gap: "12px" }}>
+              <button
+                type="button"
+                className="attach-button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isGenerating}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  padding: "4px 0",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transition: "color 0.2s"
+                }}
+                onMouseOver={(e) => (e.currentTarget.style.color = "var(--accent-bright-blue)")}
+                onMouseOut={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+                title="Attach document"
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                </svg>
+              </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                multiple
+                style={{ display: "none" }}
+              />
+
+              <textarea
+                className="chat-input"
+                rows={1}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask anything about corporate law or notices..."
+                disabled={isGenerating}
+              />
+              <button
+                className="send-button"
+                onClick={() => {
+                  handleSend(inputValue);
+                  setInputValue("");
+                }}
+                disabled={(!inputValue.trim() && attachedFiles.length === 0) || isGenerating}
+              >
+                <svg className="send-icon-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                </svg>
+              </button>
+            </div>
           </div>
           <div className="input-footer-text">
             Protected by ARG Corporate Security Proxy Gateways. Statutory context indexed from FBR & SECP frameworks.

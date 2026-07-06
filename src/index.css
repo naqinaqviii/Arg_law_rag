@@ -805,3 +805,82 @@ body {
   align-items: center;
   gap: 8px;
 }
+
+/* =========================================================================
+   DOCUMENT UPLOAD AND PREVIEWS (Premium Micro-interactions)
+   ========================================================================= */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinner-icon {
+  display: inline-block;
+  animation: spin 1.2s linear infinite;
+  font-size: 0.8rem;
+  color: var(--accent-gold);
+}
+
+.attachment-preview-chip {
+  animation: slideUpFade 0.25s cubic-bezier(0.4, 0, 0.2, 1) both;
+  backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.6) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 2px 6px rgba(11, 30, 51, 0.03);
+  transition: all 0.2s ease;
+}
+
+.attachment-preview-chip:hover {
+  border-color: rgba(37, 99, 235, 0.3) !important;
+  background: #ffffff !important;
+  transform: translateY(-1px);
+}
+
+.attachment-preview-chip.uploading {
+  border-style: dashed !important;
+  background: rgba(255, 255, 255, 0.4) !important;
+}
+
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Document Cards in Messages */
+.message-document-card {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: default;
+}
+
+.message-document-card:hover {
+  transform: translateY(-2px);
+  background: rgba(37, 99, 235, 0.04) !important;
+  border-color: rgba(37, 99, 235, 0.25) !important;
+  box-shadow: 0 4px 15px rgba(37, 99, 235, 0.06);
+}
+
+.message-row.user .message-document-card {
+  background: rgba(255, 255, 255, 0.4) !important;
+  border-color: rgba(11, 30, 51, 0.08) !important;
+}
+
+.message-row.user .message-document-card:hover {
+  background: rgba(255, 255, 255, 0.8) !important;
+  border-color: rgba(37, 99, 235, 0.25) !important;
+}
+
+.message-row.assistant .message-document-card {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+.message-row.assistant .message-document-card:hover {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border-color: rgba(37, 99, 235, 0.25) !important;
+}
