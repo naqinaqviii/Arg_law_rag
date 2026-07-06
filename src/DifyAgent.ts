@@ -162,12 +162,12 @@ export class DifyAgent extends AbstractAgent {
           const requestHeaders: Record<string, string> = {
             "Content-Type": "application/json"
           };
-          
+
           if (this.apiKey) {
             // requestHeaders["Authorization"] = `Bearer ${this.apiKey}`;
             requestHeaders["Authorization"] = `Bearer ${"app-NaiszFmtKTlPA13NLzT4Mc80"}`;
           }
-            requestHeaders["Authorization"] = `Bearer ${"app-NaiszFmtKTlPA13NLzT4Mc80"}`;
+          requestHeaders["Authorization"] = `Bearer ${"app-NaiszFmtKTlPA13NLzT4Mc80"}`;
 
           const requestBody = {
             inputs: {},
